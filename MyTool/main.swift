@@ -429,6 +429,7 @@ func scrapeGitHubRelease(name: String, bundleId: String?, filename: String) asyn
     }
 
     let expectedNames = Set([normalizedDiscoveryName(name), normalizedDiscoveryName(appName)])
+    var repositoryFallback: DownloadSourceInfo?
     for term in searchTerms {
         var components = URLComponents(string: "https://api.github.com/search/repositories")
         components?.queryItems = [
@@ -454,8 +455,23 @@ func scrapeGitHubRelease(name: String, bundleId: String?, filename: String) asyn
         }
 
         for repository in matchingRepositories.prefix(3) {
-            guard let fullName = repository["full_name"] as? String,
-                  let releaseURL = URL(string: "https://api.github.com/repos/\(fullName)/releases/latest"),
+            guard let fullName = repository["full_name"] as? String else {
+                continue
+            }
+
+            let repositoryPage = repository["html_url"] as? String
+            if repositoryFallback == nil {
+                repositoryFallback = DownloadSourceInfo(
+                    sourceName: "GitHub Repository (\(fullName))",
+                    downloadURL: nil,
+                    webURL: repositoryPage,
+                    version: nil,
+                    extraDetails: "No published GitHub release asset was found.",
+                    homebrewPackage: nil
+                )
+            }
+
+            guard let releaseURL = URL(string: "https://api.github.com/repos/\(fullName)/releases/latest"),
                   let release = await fetchGitHubJSON(from: releaseURL) else {
                 continue
             }
@@ -473,20 +489,41 @@ func scrapeGitHubRelease(name: String, bundleId: String?, filename: String) asyn
             }
 
             let releasePage = release["html_url"] as? String
+            let repositoryWebsite = repository["homepage"] as? String
+            let website = repositoryWebsite?.isEmpty == false ? repositoryWebsite : releasePage
             let version = (release["name"] as? String) ?? (release["tag_name"] as? String)
             let assetName = asset["name"] as? String
             return DownloadSourceInfo(
                 sourceName: "GitHub Release (\(fullName))",
                 downloadURL: downloadURL,
-                webURL: releasePage,
+                webURL: website,
                 version: version,
-                extraDetails: assetName.map { "Release asset: \($0)" },
+                extraDetails: [
+                    assetName.map { "Release asset: \($0)" },
+                    releasePage.map { "GitHub release: \($0)" }
+                ].compactMap { $0 }.joined(separator: " • "),
                 homebrewPackage: nil
             )
         }
     }
 
-    return nil
+    if let repositoryFallback {
+        return repositoryFallback
+    }
+
+    var searchComponents = URLComponents(string: "https://github.com/search")
+    searchComponents?.queryItems = [
+        URLQueryItem(name: "q", value: appName),
+        URLQueryItem(name: "type", value: "repositories")
+    ]
+    return DownloadSourceInfo(
+        sourceName: "GitHub Repository Search",
+        downloadURL: nil,
+        webURL: searchComponents?.url?.absoluteString,
+        version: nil,
+        extraDetails: "No matching GitHub repository or release asset was found.",
+        homebrewPackage: nil
+    )
 }
 
 func scrapeHomebrewCask(name: String, bundleId: String?, filename: String) async -> DownloadSourceInfo? {
@@ -834,7 +871,7 @@ func inspectTarget(path: String, fetchNetwork: Bool) async -> AppDetails? {
     // Determine Primary Download URL & Web URL
     var primaryDownloadURL: String? = nil
     var primaryWebURL: String? = nil
-    for src in downloadSources {
+    for src in downloadSources where src.sourceName != "GitHub Repository Search" {
         if primaryDownloadURL == nil && src.downloadURL != nil {
             primaryDownloadURL = src.downloadURL
         }

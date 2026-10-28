@@ -9,6 +9,7 @@ set -e
 TOOL_NAME="appinfo"
 ALIAS_NAME="appinspect"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_FILE="${PROJECT_DIR}/AppInfo.xcodeproj"
 BUILD_DIR="${PROJECT_DIR}/build"
 INSTALL_DIR="/usr/local/bin"
 
@@ -23,7 +24,7 @@ if ! command -v xcodebuild >/dev/null 2>&1; then
 fi
 
 echo "🔨 Building Release binary with xcodebuild..."
-xcodebuild -project "${PROJECT_DIR}/Untitled Project.xcodeproj" \
+xcodebuild -project "${PROJECT_FILE}" \
            -scheme "MyTool" \
            -configuration Release \
            -derivedDataPath "${BUILD_DIR}" \
